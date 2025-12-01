@@ -4,3 +4,6 @@ from .equipment_repository import EquipmentRepository
 from .event_repository import EventRepository
 from .training_plan_repository import TrainingPlanRepository
 from .workout_result_repository import WorkoutResultRepository
+from .lookup_repository import LookupRepository
+from .movement_repository import MovementRepository
+from .user_metrics_repository import UserTrainingLoadRepository, UserCapacityProfileRepository

@@ -13,14 +13,18 @@ from application.schemas.workouts import (
     WorkoutCapacitySchema,
     WorkoutHyroxStationSchema,
     WorkoutAnalysisResponse,
+    WorkoutStatsRead,
 )
+from application.schemas.workout_blocks import WorkoutBlockSchema, WorkoutBlockMovementSchema
+from application.schemas.movements import MovementRead, MovementMuscleSchema
 from application.services import WorkoutService
 from domain.models.enums import AthleteLevel, EnergyDomain, MuscleGroup
 from infrastructure.db.session import get_session
+from infrastructure.auth.dependencies import get_current_user
 from infrastructure.db.models import WorkoutORM
 
 router = APIRouter()
-analysis_router = APIRouter()
+analysis_router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _decimal_to_float(value):
@@ -30,7 +34,51 @@ def _decimal_to_float(value):
         return value
 
 
-def to_read_model(workout: WorkoutORM) -> WorkoutRead:
+def _movement_to_read(movement) -> MovementRead:
+    return MovementRead(
+        id=movement.id,
+        name=movement.name,
+        category=movement.category,
+        description=movement.description,
+        default_load_unit=movement.default_load_unit,
+        video_url=movement.video_url,
+        muscles=[
+            MovementMuscleSchema(muscle_group=mm.muscle_group.code if mm.muscle_group else "", is_primary=mm.is_primary)
+            for mm in movement.muscles
+        ],
+    )
+
+
+def _block_to_schema(block) -> WorkoutBlockSchema:
+    return WorkoutBlockSchema(
+        id=block.id,
+        workout_id=block.workout_id,
+        position=block.position,
+        block_type=block.block_type,
+        title=block.title,
+        description=block.description,
+        duration_seconds=block.duration_seconds,
+        rounds=block.rounds,
+        notes=block.notes,
+        movements=[
+            WorkoutBlockMovementSchema(
+                id=mv.id,
+                movement_id=mv.movement_id,
+                position=mv.position,
+                reps=_decimal_to_float(mv.reps),
+                load=_decimal_to_float(mv.load),
+                load_unit=mv.load_unit,
+                distance_meters=_decimal_to_float(mv.distance_meters),
+                duration_seconds=mv.duration_seconds,
+                calories=_decimal_to_float(mv.calories),
+                movement=_movement_to_read(mv.movement) if mv.movement else None,
+            )
+            for mv in block.movements
+        ],
+    )
+
+
+def to_read_model(workout: WorkoutORM, include_structure: bool = False) -> WorkoutRead:
     meta = workout.metadata_rel
     stats = workout.stats
     return WorkoutRead(
@@ -50,6 +98,7 @@ def to_read_model(workout: WorkoutORM) -> WorkoutRead:
         load_type=meta.load_type if meta else None,
         estimated_difficulty=_decimal_to_float(stats.estimated_difficulty) if stats else None,
         main_muscle_chain=workout.main_muscle_group.code if workout.main_muscle_group else None,
+        extra_attributes_json=meta.extra_attributes_json if meta else None,
         athlete_profile_desc=meta.athlete_profile_desc if meta else None,
         target_athlete_desc=meta.target_athlete_desc if meta else None,
         session_load=meta.session_load if meta else None,
@@ -84,6 +133,7 @@ def to_read_model(workout: WorkoutORM) -> WorkoutRead:
         muscles=[m.muscle_group.code if m.muscle_group else None for m in workout.muscles],
         equipment_ids=[eq.equipment_id for eq in workout.equipment_links],
         similar_workout_ids=[sim.similar_workout_id for sim in workout.similar_from],
+        blocks=[_block_to_schema(block) for block in workout.blocks] if include_structure else [],
     )
 
 
@@ -100,6 +150,25 @@ def list_workouts(
     return [to_read_model(workout) for workout in workouts]
 
 
+@router.get("/stats", response_model=List[WorkoutStatsRead])
+def list_workout_stats(session: Session = Depends(get_session)):
+    service = WorkoutService(session)
+    workouts = service.stats()
+    return [
+        WorkoutStatsRead(
+            workout_id=w.id,
+            title=w.title,
+            estimated_difficulty=_decimal_to_float(w.stats.estimated_difficulty) if w.stats else None,
+            avg_time_seconds=w.stats.avg_time_seconds if w.stats else None,
+            avg_rating=_decimal_to_float(w.stats.avg_rating) if w.stats else None,
+            avg_difficulty=_decimal_to_float(w.stats.avg_difficulty) if w.stats else None,
+            rating_count=w.stats.rating_count if w.stats else None,
+        )
+        for w in workouts
+        if w.stats
+    ]
+
+
 @router.post("/", response_model=WorkoutRead, status_code=status.HTTP_201_CREATED)
 def create_workout(payload: WorkoutCreate, session: Session = Depends(get_session)):
     service = WorkoutService(session)
@@ -114,6 +183,15 @@ def get_workout(workout_id: int, session: Session = Depends(get_session)):
     if not workout:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
     return to_read_model(workout)
+
+
+@router.get("/{workout_id}/structure", response_model=WorkoutRead)
+def get_workout_structure(workout_id: int, session: Session = Depends(get_session)):
+    service = WorkoutService(session)
+    workout = service.structure(workout_id)
+    if not workout:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+    return to_read_model(workout, include_structure=True)
 
 
 @router.put("/{workout_id}", response_model=WorkoutRead)
@@ -168,3 +246,21 @@ def similar_workouts(workout_id: int, session: Session = Depends(get_session)):
     service = WorkoutService(session)
     workouts = service.similar(workout_id)
     return [to_read_model(workout) for workout in workouts]
+
+
+@router.get("/{workout_id}/blocks", response_model=List[WorkoutBlockSchema])
+def workout_blocks(workout_id: int, session: Session = Depends(get_session)):
+    service = WorkoutService(session)
+    workout = service.structure(workout_id)
+    if not workout:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+    return [WorkoutBlockSchema.model_validate(block) for block in workout.blocks]
+
+
+@router.get("/{workout_id}/versions", response_model=List[WorkoutRead])
+def workout_versions(workout_id: int, session: Session = Depends(get_session)):
+    service = WorkoutService(session)
+    versions = service.versions(workout_id)
+    if not versions:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
+    return [to_read_model(w) for w in versions]

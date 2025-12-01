@@ -79,6 +79,7 @@ class Workout:
     load_type: Optional[str] = None
     estimated_difficulty: Optional[float] = None
     main_muscle_chain: Optional[str] = None
+    extra_attributes_json: Optional[dict] = None
     athlete_profile_desc: Optional[str] = None
     target_athlete_desc: Optional[str] = None
     session_load: Optional[str] = None
@@ -103,6 +104,7 @@ class Workout:
     hyrox_stations: List[WorkoutHyroxStation] = field(default_factory=list)
     muscles: List[WorkoutMuscle] = field(default_factory=list)
     equipment: List[WorkoutEquipment] = field(default_factory=list)
+    blocks: List["WorkoutBlock"] = field(default_factory=list)
 
 
 @dataclass
@@ -151,3 +153,69 @@ class WorkoutResult:
 class SimilarWorkout:
     workout_id: int
     similar_workout_id: int
+
+
+@dataclass
+class MovementMuscle:
+    movement_id: int
+    muscle_group: MuscleGroup
+    is_primary: bool
+
+
+@dataclass
+class Movement:
+    name: str
+    category: Optional[str]
+    description: Optional[str]
+    default_load_unit: Optional[str]
+    video_url: Optional[str]
+    id: Optional[int] = None
+    muscles: List[MovementMuscle] = field(default_factory=list)
+
+
+@dataclass
+class WorkoutBlockMovement:
+    movement_id: int
+    position: int
+    reps: Optional[float] = None
+    load: Optional[float] = None
+    load_unit: Optional[str] = None
+    distance_meters: Optional[float] = None
+    duration_seconds: Optional[int] = None
+    calories: Optional[float] = None
+    id: Optional[int] = None
+    movement: Optional[Movement] = None
+
+
+@dataclass
+class WorkoutBlock:
+    workout_id: int
+    position: int
+    block_type: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    rounds: Optional[int] = None
+    notes: Optional[str] = None
+    id: Optional[int] = None
+    movements: List[WorkoutBlockMovement] = field(default_factory=list)
+
+
+@dataclass
+class UserTrainingLoad:
+    user_id: int
+    load_date: str
+    acute_load: Optional[float] = None
+    chronic_load: Optional[float] = None
+    load_ratio: Optional[float] = None
+    notes: Optional[str] = None
+    id: Optional[int] = None
+
+
+@dataclass
+class UserCapacityProfile:
+    user_id: int
+    capacity_id: int
+    value: int
+    measured_at: str
+    id: Optional[int] = None

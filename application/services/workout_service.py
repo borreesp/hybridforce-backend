@@ -9,6 +9,10 @@ from domain.models.entities import (
     WorkoutHyroxStation,
     WorkoutMuscle,
     WorkoutEquipment,
+    WorkoutBlock,
+    WorkoutBlockMovement,
+    Movement,
+    MovementMuscle,
 )
 from domain.models.enums import EnergyDomain, IntensityLevel, MuscleGroup, PhysicalCapacity, AthleteLevel, HyroxStation
 from domain.services.workout_analysis import analyze_workout
@@ -62,6 +66,15 @@ class WorkoutService:
         domain_model = self._to_domain_from_payload(workout_input)
         return analyze_workout(domain_model)
 
+    def structure(self, workout_id: int):
+        return self.repo.get_with_structure(workout_id)
+
+    def versions(self, workout_id: int):
+        return self.repo.list_versions(workout_id)
+
+    def stats(self):
+        return self.repo.list_stats()
+
     def _to_domain(self, workout: WorkoutORM) -> Workout:
         metadata = workout.metadata_rel
         stats = workout.stats
@@ -86,6 +99,7 @@ class WorkoutService:
             load_type=metadata.load_type if metadata else None,
             estimated_difficulty=_to_float(stats.estimated_difficulty) if stats else None,
             main_muscle_chain=MuscleGroup(main_muscle_code) if main_muscle_code else None,
+            extra_attributes_json=metadata.extra_attributes_json if metadata else None,
             athlete_profile_desc=metadata.athlete_profile_desc if metadata else None,
             target_athlete_desc=metadata.target_athlete_desc if metadata else None,
             session_load=metadata.session_load if metadata else None,
@@ -132,6 +146,51 @@ class WorkoutService:
                 for m in workout.muscles
             ],
             equipment=[WorkoutEquipment(workout_id=eq.workout_id, equipment_id=eq.equipment_id) for eq in workout.equipment_links],
+            blocks=[
+                WorkoutBlock(
+                    id=block.id,
+                    workout_id=block.workout_id,
+                    position=block.position,
+                    block_type=block.block_type,
+                    title=block.title,
+                    description=block.description,
+                    duration_seconds=block.duration_seconds,
+                    rounds=block.rounds,
+                    notes=block.notes,
+                    movements=[
+                        WorkoutBlockMovement(
+                            id=mv.id,
+                            movement_id=mv.movement_id,
+                            position=mv.position,
+                            reps=_to_float(mv.reps),
+                            load=_to_float(mv.load),
+                            load_unit=mv.load_unit,
+                            distance_meters=_to_float(mv.distance_meters),
+                            duration_seconds=mv.duration_seconds,
+                            calories=_to_float(mv.calories),
+                            movement=Movement(
+                                id=mv.movement.id if mv.movement else None,
+                                name=mv.movement.name if mv.movement else "",
+                                category=mv.movement.category if mv.movement else None,
+                                description=mv.movement.description if mv.movement else None,
+                                default_load_unit=mv.movement.default_load_unit if mv.movement else None,
+                                video_url=mv.movement.video_url if mv.movement else None,
+                                muscles=[
+                                    MovementMuscle(
+                                        movement_id=muscle.movement_id,
+                                        muscle_group=MuscleGroup(muscle.muscle_group.code),
+                                        is_primary=muscle.is_primary,
+                                    )
+                                    for muscle in (mv.movement.muscles if mv.movement else [])
+                                    if muscle.muscle_group
+                                ],
+                            ),
+                        )
+                        for mv in block.movements
+                    ],
+                )
+                for block in workout.blocks
+            ],
         )
 
     def _to_domain_from_payload(self, data: WorkoutCreate) -> Workout:
@@ -151,6 +210,7 @@ class WorkoutService:
             load_type=data.load_type,
             estimated_difficulty=data.estimated_difficulty,
             main_muscle_chain=data.main_muscle_chain,
+            extra_attributes_json=data.extra_attributes_json,
             athlete_profile_desc=data.athlete_profile_desc,
             target_athlete_desc=data.target_athlete_desc,
             session_load=data.session_load,

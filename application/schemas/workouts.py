@@ -3,6 +3,7 @@ from typing import List, Optional
 from pydantic import Field
 
 from domain.models.enums import AthleteLevel, EnergyDomain, IntensityLevel, PhysicalCapacity, MuscleGroup, HyroxStation
+from .workout_blocks import WorkoutBlockSchema
 from .base import ORMModel
 
 
@@ -39,6 +40,7 @@ class WorkoutBase(ORMModel):
     load_type: str
     estimated_difficulty: float
     main_muscle_chain: str
+    extra_attributes_json: Optional[dict] = None
     athlete_profile_desc: str
     target_athlete_desc: str
     session_load: str
@@ -81,6 +83,7 @@ class WorkoutUpdate(ORMModel):
     load_type: Optional[str] = None
     estimated_difficulty: Optional[float] = None
     main_muscle_chain: Optional[str] = None
+    extra_attributes_json: Optional[dict] = None
     athlete_profile_desc: Optional[str] = None
     target_athlete_desc: Optional[str] = None
     session_load: Optional[str] = None
@@ -112,6 +115,7 @@ class WorkoutRead(WorkoutBase):
     muscles: List[MuscleGroup] = Field(default_factory=list)
     equipment_ids: List[int] = Field(default_factory=list)
     similar_workout_ids: List[int] = Field(default_factory=list)
+    blocks: List[WorkoutBlockSchema] = Field(default_factory=list)
 
 
 class WorkoutFilter(ORMModel):
@@ -128,3 +132,13 @@ class WorkoutAnalysisResponse(ORMModel):
     pacing: dict
     expected_feel: str
     session_load: str
+
+
+class WorkoutStatsRead(ORMModel):
+    workout_id: int
+    title: Optional[str] = None
+    estimated_difficulty: Optional[float] = None
+    avg_time_seconds: Optional[int] = None
+    avg_rating: Optional[float] = None
+    avg_difficulty: Optional[float] = None
+    rating_count: Optional[int] = None

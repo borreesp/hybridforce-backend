@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from domain.models.enums import AthleteLevel, EnergyDomain, IntensityLevel, MuscleGroup
@@ -12,6 +13,10 @@ from infrastructure.db.models import (
     MuscleGroupORM,
     PhysicalCapacityORM,
     SimilarWorkoutORM,
+    MovementMuscleORM,
+    MovementORM,
+    WorkoutBlockMovementORM,
+    WorkoutBlockORM,
     WorkoutCapacityORM,
     WorkoutEquipmentORM,
     WorkoutHyroxStationORM,
@@ -245,3 +250,39 @@ class WorkoutRepository(BaseRepository):
         if not ids:
             return []
         return self.session.query(WorkoutORM).filter(WorkoutORM.id.in_(ids)).all()
+
+    def get_with_structure(self, workout_id: int) -> WorkoutORM | None:
+        return (
+            self.session.query(WorkoutORM)
+            .options(
+                joinedload(WorkoutORM.metadata_rel),
+                joinedload(WorkoutORM.stats),
+                joinedload(WorkoutORM.level_times).joinedload(WorkoutLevelTimeORM.athlete_level),
+                joinedload(WorkoutORM.capacities).joinedload(WorkoutCapacityORM.capacity),
+                joinedload(WorkoutORM.hyrox_stations).joinedload(WorkoutHyroxStationORM.station),
+                joinedload(WorkoutORM.muscles).joinedload(WorkoutMuscleORM.muscle_group),
+                joinedload(WorkoutORM.blocks)
+                .joinedload(WorkoutBlockORM.movements)
+                .joinedload(WorkoutBlockMovementORM.movement)
+                .joinedload(MovementORM.muscles)
+                .joinedload(MovementMuscleORM.muscle_group),
+            )
+            .filter(WorkoutORM.id == workout_id)
+            .first()
+        )
+
+    def list_versions(self, workout_id: int) -> List[WorkoutORM]:
+        workout = self.get(workout_id)
+        if not workout:
+            return []
+        root_id = workout.parent_workout_id or workout.id
+        return (
+            self.session.query(WorkoutORM)
+            .options(joinedload(WorkoutORM.metadata_rel), joinedload(WorkoutORM.stats))
+            .filter(or_(WorkoutORM.id == root_id, WorkoutORM.parent_workout_id == root_id))
+            .order_by(WorkoutORM.version.asc())
+            .all()
+        )
+
+    def list_stats(self) -> List[WorkoutORM]:
+        return self.session.query(WorkoutORM).options(joinedload(WorkoutORM.stats)).all()

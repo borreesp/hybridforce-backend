@@ -4,3 +4,6 @@ from .equipment_service import EquipmentService
 from .event_service import EventService
 from .training_plan_service import TrainingPlanService
 from .workout_result_service import WorkoutResultService
+from .movement_service import MovementService
+from .lookup_service import LookupService
+from .auth_service import AuthService

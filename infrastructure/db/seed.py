@@ -1,5 +1,6 @@
-from datetime import date
+from datetime import date, datetime
 
+from infrastructure.auth.security import hash_password
 from infrastructure.db.models import (
     AthleteLevelORM,
     EnergyDomainORM,
@@ -15,6 +16,8 @@ from infrastructure.db.models import (
     TrainingPlanORM,
     UserEventORM,
     UserORM,
+    UserTrainingLoadORM,
+    UserCapacityProfileORM,
     WorkoutBlockMovementORM,
     WorkoutBlockORM,
     WorkoutCapacityORM,
@@ -98,7 +101,7 @@ def seed_data(session):
     user = UserORM(
         name="Lena Hybrid",
         email="lena@example.com",
-        password="changeme",
+        password=hash_password("changeme"),
         athlete_level_id=id_for(AthleteLevelORM, "Intermedio"),
     )
 
@@ -209,6 +212,31 @@ def seed_data(session):
 
     session.add_all([user, rower, sled, plan, event])
     session.flush()
+
+    session.add_all(
+        [
+            UserTrainingLoadORM(user_id=user.id, load_date=date.today(), acute_load=320, chronic_load=300, load_ratio=1.07, notes="Inicio de bloque"),
+            UserTrainingLoadORM(user_id=user.id, load_date=date.today().replace(day=max(1, date.today().day - 1)), acute_load=340, chronic_load=305, load_ratio=1.11),
+            UserTrainingLoadORM(user_id=user.id, load_date=date.today().replace(day=max(1, date.today().day - 2)), acute_load=360, chronic_load=310, load_ratio=1.16),
+        ]
+    )
+
+    session.add_all(
+        [
+            UserCapacityProfileORM(
+                user_id=user.id,
+                capacity_id=id_for(PhysicalCapacityORM, "Resistencia"),
+                value=78,
+                measured_at=datetime.utcnow(),
+            ),
+            UserCapacityProfileORM(
+                user_id=user.id,
+                capacity_id=id_for(PhysicalCapacityORM, "Fuerza"),
+                value=72,
+                measured_at=datetime.utcnow(),
+            ),
+        ]
+    )
 
     session.add(UserEventORM(user_id=user.id, event_id=event.id))
     session.add(WorkoutEquipmentORM(workout_id=workout.id, equipment_id=rower.id))

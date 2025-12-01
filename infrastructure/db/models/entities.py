@@ -107,6 +107,7 @@ class UserORM(Base):
     email = Column(String(100), nullable=False, index=True)
     password = Column(String(100), nullable=False)
     athlete_level_id = Column(Integer, ForeignKey("athlete_levels.id"), nullable=True)
+    token_version = Column(Integer, nullable=False, default=0, server_default="0")
 
     athlete_level = relationship("AthleteLevelORM", back_populates="users")
     results = relationship("WorkoutResultORM", back_populates="user", cascade="all, delete-orphan")
