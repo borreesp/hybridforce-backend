@@ -1,0 +1,12 @@
+# Prevent local env files and build artifacts from leaking into the image
+.env
+.env.*
+__pycache__/
+.pytest_cache/
+.vscode/
+.idea/
+.git
+.gitignore
+*.pyc
+*.pyo
+.DS_Store
