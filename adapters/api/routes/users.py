@@ -10,7 +10,7 @@ from application.schemas.results import WorkoutResultRead
 from application.services import UserService
 from infrastructure.db.session import get_session
 from infrastructure.auth.dependencies import get_current_user
-from infrastructure.db.models import UserORM
+from infrastructure.db.models import UserORM, WorkoutExecutionORM, WorkoutORM
 
 router = APIRouter()
 
@@ -105,6 +105,50 @@ def user_training_load(user_id: int, session: Session = Depends(get_session), cu
     if loads is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return [UserTrainingLoadRead.model_validate(item) for item in loads]
+
+
+@router.get("/{user_id}/training-load/details")
+def user_training_load_details(user_id: int, session: Session = Depends(get_session), current=Depends(get_current_user)):
+    """
+    Devuelve el detalle de carga por ejecución (cada WOD aplicado) para no perder el desglose diario.
+    """
+    if current.id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    executions = (
+        session.query(WorkoutExecutionORM)
+        .join(WorkoutORM, WorkoutExecutionORM.workout_id == WorkoutORM.id)
+        .filter(WorkoutExecutionORM.user_id == user_id)
+        .order_by(WorkoutExecutionORM.executed_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    details = []
+    for exe in executions:
+        impact = {}
+        if isinstance(exe.raw_ocr_json, dict):
+            impact = exe.raw_ocr_json.get("impact") or {}
+        acute = impact.get("acute_load")
+        chronic = impact.get("chronic_load")
+        # fallback: usar tiempo total si no hay impacto
+        if acute is None and exe.total_time_seconds is not None:
+            acute = float(exe.total_time_seconds) or 0.0
+        if chronic is None and exe.total_time_seconds is not None:
+            chronic = float(exe.total_time_seconds) * 0.65
+        details.append(
+            {
+                "id": exe.id,
+                "workout_id": exe.workout_id,
+                "workout_title": exe.workout.title if exe.workout else None,
+                "load_date": exe.executed_at.date().isoformat() if exe.executed_at else None,
+                "executed_at": exe.executed_at.isoformat() if exe.executed_at else None,
+                "acute_load": acute,
+                "chronic_load": chronic,
+                "notes": exe.notes,
+            }
+        )
+    return details
 
 
 @router.get("/{user_id}/capacity-profile", response_model=UserCapacityProfileResponse)

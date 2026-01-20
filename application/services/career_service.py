@@ -24,24 +24,36 @@ class CareerService:
         return progress
 
     def _compute_level(self, xp_total: int) -> Dict[str, Optional[int]]:
+        """
+        Calcula el nivel solo con min_xp/sort_order para evitar depender de max_xp obsoleto
+        y permitir saltos de varios niveles en un solo cálculo de XP.
+        """
         levels = self._levels()
-        current = levels[0] if levels else None
+        if not levels:
+            return {"level": 1, "next_level": None, "progress_pct": 0, "xp_to_next": None, "athlete_level_id": None}
+
+        current = levels[0]
         next_level = None
-        for idx, lvl in enumerate(levels):
-            min_xp = lvl.min_xp or 0
-            max_xp = lvl.max_xp or min_xp
-            if xp_total < max_xp:
-                current = lvl
-                next_level = levels[idx + 1] if idx + 1 < len(levels) else None
+        previous = None
+
+        for lvl in levels:
+            lvl_min = lvl.min_xp or 0
+            if xp_total < lvl_min:
+                current = previous or lvl
+                next_level = lvl
                 break
             current = lvl
-            next_level = levels[idx + 1] if idx + 1 < len(levels) else None
-        if not current:
-            return {"level": 1, "next_level": None, "progress_pct": 0, "xp_to_next": None, "athlete_level_id": None}
+            previous = lvl
+        else:
+            # XP por encima del último nivel: nos quedamos en el máximo nivel conocido
+            current = previous or current
+            next_level = None
+
         min_xp = current.min_xp or 0
         xp_span = (next_level.min_xp - min_xp) if next_level and next_level.min_xp is not None else None
         progress_pct = 100.0 if not xp_span or xp_span <= 0 else max(0.0, min(100.0, ((xp_total - min_xp) / xp_span) * 100))
         xp_to_next = (next_level.min_xp - xp_total) if next_level and next_level.min_xp is not None else None
+
         return {
             "level": current.sort_order or current.id,
             "athlete_level_id": current.id,

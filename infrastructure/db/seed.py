@@ -1,3 +1,4 @@
+import os
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import inspect
@@ -120,11 +121,71 @@ def _seed_missions(session):
     session.flush()
 
 
+def ensure_seed_user(session, reset: bool = False):
+    """
+    Garantiza un usuario seed idempotente.
+    Si existe y reset=True, lo resetea a valores base.
+    """
+    seed_email = os.getenv("SEED_EMAIL", "seed@hybridforce.com").lower()
+    legacy_seed_emails = {"seed@local.test"}
+    seed_name = os.getenv("SEED_USERNAME", "seed_user")
+    hashed_pw = hash_password("changeme")
+
+    existing = session.query(UserORM).filter(UserORM.email == seed_email).first()
+    if not existing:
+        # Compatibilidad con seeds anteriores usando seed@local.test
+        legacy = session.query(UserORM).filter(UserORM.email.in_(legacy_seed_emails)).first()
+        if legacy:
+            existing = legacy
+            existing.email = seed_email
+
+    if existing:
+        if reset:
+            existing.name = seed_name
+            existing.password = hashed_pw
+            existing.athlete_level_id = None
+            existing.token_version = 0
+            progress = session.query(UserProgressORM).filter(UserProgressORM.user_id == existing.id).first()
+            if progress:
+                progress.xp_total = 0
+                progress.level = 0
+                progress.progress_pct = 0
+            print("[seed] Seed user ensured (reset)")
+        else:
+            print("[seed] Seed user ensured (exists)")
+        return
+
+    user = UserORM(
+        name=seed_name,
+        email=seed_email,
+        password=hashed_pw,
+        athlete_level_id=None,
+        token_version=0,
+    )
+    session.add(user)
+    session.flush()
+    session.add(
+        UserProgressORM(
+            user_id=user.id,
+            xp_total=0,
+            level=0,
+            progress_pct=0,
+        )
+    )
+    print("[seed] Seed user ensured (created)")
+
+
 def seed_data(session):
     inspector = inspect(session.bind)
     # Si no existen tablas base (ej: users), salimos sin romper el arranque.
     if not inspector.has_table(UserORM.__tablename__):
         return
+
+    reset_seed = os.getenv("RESET_SEED", "false").lower() == "true"
+    seed_email = os.getenv("SEED_EMAIL", "seed@hybridforce.com").lower()
+    legacy_seed_emails = {"seed@local.test"}
+    seed_emails = {seed_email, *legacy_seed_emails}
+    had_non_seed_users_before = session.query(UserORM).filter(~UserORM.email.in_(seed_emails)).count() > 0
 
     athlete_levels = _xp_levels()
     intensity_levels = [
@@ -173,8 +234,9 @@ def seed_data(session):
     _ensure_lookup(session, HyroxStationORM, hyrox_stations)
     _seed_achievements(session)
     _seed_missions(session)
+    ensure_seed_user(session, reset_seed)
 
-    if session.query(UserORM).count() > 0:
+    if had_non_seed_users_before:
         session.commit()
         return
 
@@ -1862,11 +1924,16 @@ def seed_data(session):
         executions.append(exec_row)
     session.add_all(exec_blocks)
 
-    # Event demo
-    event = EventORM(name="HYROX Madrid", date=today, location="Madrid", type="HYROX")
-    session.add(event)
-    session.flush()
-    session.add(UserEventORM(user_id=user.id, event_id=event.id))
+    # Event demo (solo si existe tabla events)
+    try:
+        if inspector.has_table("events"):
+            event = EventORM(name="HYROX Madrid", date=today, location="Madrid", type="HYROX")
+            session.add(event)
+            session.flush()
+            session.add(UserEventORM(user_id=user.id, event_id=event.id))
+    except Exception:
+        # tabla eliminada por migración: ignorar silenciosamente para no romper seed
+        session.rollback()
 
     session.commit()
 
