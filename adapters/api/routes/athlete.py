@@ -214,6 +214,35 @@ def benchmarks(session: Session = Depends(get_session), current_user=Depends(get
     ]
 
 
+def _segment_block_id(segment_id: str) -> Optional[int]:
+    try:
+        parts = (segment_id or "").split(":")
+        if len(parts) < 2:
+            return None
+        digits = "".join(ch for ch in parts[1] if ch.isdigit())
+        return int(digits) if digits else None
+    except Exception:
+        return None
+
+
+def _block_times_from_segments(segment_times: Dict[str, Any], ordered_blocks: List[Any]) -> List[Optional[float]]:
+    block_map: Dict[int, float] = {}
+    for key, value in (segment_times or {}).items():
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            continue
+        if seconds <= 0:
+            continue
+        block_id = _segment_block_id(key)
+        if block_id is None:
+            continue
+        block_map[block_id] = block_map.get(block_id, 0.0) + seconds
+    if ordered_blocks:
+        return [block_map.get(b.id) for b in ordered_blocks]
+    return list(block_map.values())
+
+
 @router.post("/workouts/{workout_id}/result", response_model=WorkoutResultWithXp, status_code=status.HTTP_201_CREATED)
 def submit_result(
     workout_id: int,
@@ -228,29 +257,59 @@ def submit_result(
     Además, registra la ejecución y tiempos por bloque si existen.
     """
     logger.info(
-        "[submit_result] user=%s workout=%s method=%s total=%s blocks=%s",
+        "[submit_result] user=%s workout=%s method=%s total=%s blocks=%s segments=%s",
         current_user.id,
         workout_id,
         payload.method,
         payload.total_time_sec,
         payload.block_times_sec if payload.block_times_sec else None,
+        payload.segment_times_sec if payload.segment_times_sec else None,
     )
     if payload.method not in {"total", "by_blocks"}:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid method")
 
+    segment_times_raw = dict(payload.segment_times_sec or {})
+    segment_times: Dict[str, float] = {}
+    if segment_times_raw:
+        for key, value in segment_times_raw.items():
+            try:
+                seconds_val = float(value)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="segment_times_sec must be numeric")
+            if seconds_val <= 0:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="segment_times_sec must be positive")
+            segment_times[key] = seconds_val
     block_times = list(payload.block_times_sec or [])
     total_seconds = payload.total_time_sec
     workout_row = session.query(WorkoutORM).filter(WorkoutORM.id == workout_id).first()
     ordered_blocks = sorted(workout_row.blocks or [], key=lambda b: b.position or 0) if workout_row else []
     if payload.method == "by_blocks":
-        if not block_times:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="block_times_sec required for by_blocks")
-        if any((t is None or t <= 0) for t in block_times):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="block_times_sec must be positive")
-        total_seconds = sum(block_times)
+        if segment_times:
+            derived_block_times = _block_times_from_segments(segment_times, ordered_blocks)
+            if derived_block_times:
+                block_times = derived_block_times
+            elif not block_times and ordered_blocks:
+                block_times = [None for _ in ordered_blocks]
+            total_seconds = sum(segment_times.values())
+        elif block_times:
+            if ordered_blocks and len(block_times) != len(ordered_blocks):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="block_times_sec length must match workout blocks",
+                )
+            if any((t is None or t <= 0) for t in block_times):
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="block_times_sec must be positive")
+            total_seconds = sum(block_times)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="block_times_sec or segment_times_sec required for by_blocks",
+            )
     if payload.method == "total":
         if total_seconds is None or total_seconds <= 0:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="total_time_sec required for total")
+        if segment_times and not block_times:
+            block_times = _block_times_from_segments(segment_times, ordered_blocks)
 
     # Persistir ejecución y bloques si aplica
     execution_id = None
@@ -273,6 +332,8 @@ def submit_result(
         # Reutiliza la ejecucion del dia: solo actualiza notas e impacto
         raw_json = execution.raw_ocr_json if isinstance(execution.raw_ocr_json, dict) else {}
         raw_json["block_times_sec"] = block_times if payload.method == "by_blocks" else raw_json.get("block_times_sec")
+        raw_json["segment_times_sec"] = segment_times or raw_json.get("segment_times_sec")
+        raw_json["segment_mode"] = payload.segment_mode or raw_json.get("segment_mode")
         raw_json["impact"] = impact_snapshot
         execution.raw_ocr_json = raw_json
         execution.notes = f"{execution.notes or ''} | method={payload.method}".strip(" |")
@@ -289,6 +350,8 @@ def submit_result(
             notes=f"method={payload.method}",
             raw_ocr_json={
               "block_times_sec": block_times if payload.method == 'by_blocks' else None,
+              "segment_times_sec": segment_times or None,
+              "segment_mode": payload.segment_mode,
               "impact": impact_snapshot
             },
         )
@@ -298,12 +361,14 @@ def submit_result(
 
     if payload.method == "by_blocks":
         # mapear blocks por orden de posición
-        if ordered_blocks and len(block_times) != len(ordered_blocks):
+        if ordered_blocks and len(block_times) != len(ordered_blocks) and not segment_times:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="block_times_sec length must match workout blocks",
             )
         for idx, time_sec in enumerate(block_times):
+            if time_sec is None or time_sec <= 0:
+                continue
             block_id = ordered_blocks[idx].id if ordered_blocks and idx < len(ordered_blocks) else None
             session.add(
                 WorkoutExecutionBlockORM(

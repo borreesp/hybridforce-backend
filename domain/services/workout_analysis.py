@@ -28,12 +28,37 @@ def _domain_factor(domain: EnergyDomain) -> float:
     }.get(domain, 1.0)
 
 
+def _duration_factor(minutes: float) -> float:
+    if minutes is None:
+        return 1.0
+    if minutes <= 5:
+        return 0.8
+    if minutes <= 15:
+        return 1.0
+    if minutes <= 30:
+        return 1.15
+    return 1.3
+
+
+def _resolve_duration_minutes(workout: Workout) -> float:
+    # Prefer explicit estimated_time_minutes if present, fallback to avg_time_seconds, else safe default
+    minutes = getattr(workout, "estimated_time_minutes", None)
+    if minutes is None and getattr(workout, "avg_time_seconds", None):
+        try:
+            minutes = float(workout.avg_time_seconds) / 60.0
+        except Exception:
+            minutes = None
+    return float(minutes) if minutes is not None else 15.0
+
+
 def estimate_fatigue_score(workout: Workout) -> float:
     """Quick heuristic for session fatigue."""
-    base = workout.estimated_difficulty * _intensity_factor(workout.intensity) * _domain_factor(workout.domain)
+    base = (workout.estimated_difficulty or 0) * _intensity_factor(workout.intensity) * _domain_factor(workout.domain)
     hyrox_weight = _intensity_factor(workout.hyrox_transfer)
     hyrox_component = hyrox_weight * 2
-    return round(base + hyrox_component, 2)
+    duration_minutes = _resolve_duration_minutes(workout)
+    raw_fatigue = (base + hyrox_component) * _duration_factor(duration_minutes)
+    return min(10.0, round(raw_fatigue, 2))
 
 
 def hyrox_transfer_score(stations: List[WorkoutHyroxStation]) -> float:

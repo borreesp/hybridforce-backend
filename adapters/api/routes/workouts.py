@@ -1,7 +1,7 @@
 import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status, Request
 from sqlalchemy.orm import Session
 
 from application.schemas.workouts import (
@@ -18,10 +18,12 @@ from application.schemas.workouts import (
 from application.schemas.workout_blocks import WorkoutBlockSchema, WorkoutBlockMovementSchema
 from application.schemas.movements import MovementRead, MovementMuscleSchema
 from application.services import WorkoutService
+from application.services.xp_service import compute_xp_estimate
+from domain.services.workout_analysis import analyze_workout
 from domain.models.enums import EnergyDomain, MuscleGroup
 from infrastructure.db.session import get_session
 from infrastructure.auth.dependencies import get_current_user
-from infrastructure.db.models import WorkoutORM
+from infrastructure.db.models import WorkoutORM, UserORM
 
 router = APIRouter()
 analysis_router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -78,11 +80,24 @@ def _block_to_schema(block) -> WorkoutBlockSchema:
     )
 
 
-def to_read_model(workout: WorkoutORM, include_structure: bool = False) -> WorkoutRead:
+def _compute_xp_estimate_from_workout(service: WorkoutService, workout: WorkoutORM) -> Optional[int]:
+    try:
+        domain_model = service._to_domain(workout)
+        analysis = analyze_workout(domain_model)
+        fatigue = analysis.get("fatigue_score")
+        if fatigue is None:
+            return None
+        return int(compute_xp_estimate(float(fatigue), None)["xp"])
+    except Exception:
+        return None
+
+
+def to_read_model(workout: WorkoutORM, include_structure: bool = False, xp_estimate: Optional[int] = None) -> WorkoutRead:
     meta = workout.metadata_rel
     stats = workout.stats
     return WorkoutRead(
         id=workout.id,
+        xp_estimate=xp_estimate,
         parent_workout_id=workout.parent_workout_id,
         version=workout.version,
         is_active=workout.is_active,
@@ -147,7 +162,11 @@ def list_workouts(
     service = WorkoutService(session)
     filters = WorkoutFilter(level=level, domain=domain, muscle=muscle)
     workouts = service.list(filters)
-    return [to_read_model(workout) for workout in workouts]
+    result: List[WorkoutRead] = []
+    for workout in workouts:
+        xp_estimate = _compute_xp_estimate_from_workout(service, workout)
+        result.append(to_read_model(workout, xp_estimate=xp_estimate))
+    return result
 
 
 @router.get("/stats", response_model=List[WorkoutStatsRead])
@@ -182,7 +201,8 @@ def get_workout(workout_id: int, session: Session = Depends(get_session)):
     workout = service.get(workout_id)
     if not workout:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
-    return to_read_model(workout)
+    xp_estimate = _compute_xp_estimate_from_workout(service, workout)
+    return to_read_model(workout, xp_estimate=xp_estimate)
 
 
 @router.get("/{workout_id}/structure", response_model=WorkoutRead)
@@ -191,7 +211,8 @@ def get_workout_structure(workout_id: int, session: Session = Depends(get_sessio
     workout = service.structure(workout_id)
     if not workout:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
-    return to_read_model(workout, include_structure=True)
+    xp_estimate = _compute_xp_estimate_from_workout(service, workout)
+    return to_read_model(workout, include_structure=True, xp_estimate=xp_estimate)
 
 
 @router.put("/{workout_id}", response_model=WorkoutRead)
@@ -212,13 +233,51 @@ def delete_workout(workout_id: int, session: Session = Depends(get_session)):
     return None
 
 
+def _level_from_user(user: UserORM | None) -> int | None:
+    if not user:
+        return None
+    level_code = getattr(getattr(user, "athlete_level", None), "code", None)
+    if isinstance(level_code, str) and level_code.upper().startswith("L"):
+        try:
+            return int("".join(ch for ch in level_code if ch.isdigit()))
+        except ValueError:
+            pass
+    # fallback: try athlete_level_id or id numeric
+    level_id = getattr(user, "athlete_level_id", None)
+    if isinstance(level_id, int):
+        return level_id
+    return None
+
+
+def _with_xp_estimate(analysis: dict, user: Optional[UserORM]) -> dict:
+    fatigue = analysis.get("fatigue_score")
+    if fatigue is None:
+        return analysis
+    level = _level_from_user(user)
+    xp_data = compute_xp_estimate(float(fatigue), level)
+    analysis["xp_estimate"] = int(xp_data["xp"])
+    analysis["xp_components"] = xp_data
+    return analysis
+
+
+def get_current_user_optional(request: Request, session: Session = Depends(get_session)) -> Optional[UserORM]:
+    try:
+        return get_current_user(request=request, session=session)
+    except Exception:
+        return None
+
+
 @router.get("/{workout_id}/analysis", response_model=WorkoutAnalysisResponse)
-def workout_analysis(workout_id: int, session: Session = Depends(get_session)):
+def workout_analysis(
+    workout_id: int,
+    session: Session = Depends(get_session),
+    current_user: Optional[UserORM] = Depends(get_current_user_optional),
+):
     service = WorkoutService(session)
     analysis = service.analysis(workout_id)
     if not analysis:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
-    return analysis
+    return _with_xp_estimate(analysis, current_user)
 
 
 @analysis_router.post("/workout-analysis", response_model=WorkoutAnalysisResponse)
@@ -226,6 +285,7 @@ async def analyze_workout_payload(
     payload: Optional[WorkoutCreate] = None,
     file: Optional[UploadFile] = None,
     session: Session = Depends(get_session),
+    current_user: Optional[UserORM] = Depends(get_current_user_optional),
 ):
     service = WorkoutService(session)
     data = payload
@@ -238,7 +298,8 @@ async def analyze_workout_payload(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid file payload: {exc}") from exc
     if data is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing workout data")
-    return service.analyze_payload(data.model_dump())
+    analysis = service.analyze_payload(data.model_dump())
+    return _with_xp_estimate(analysis, current_user)
 
 
 @router.get("/{workout_id}/similar", response_model=List[WorkoutRead])

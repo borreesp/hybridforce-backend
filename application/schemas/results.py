@@ -1,4 +1,4 @@
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Dict
 
 from .base import ORMModel
 
@@ -31,6 +31,8 @@ class WorkoutResultSubmit(ORMModel):
     method: Literal["total", "by_blocks"] = "total"
     total_time_sec: Optional[int] = None
     block_times_sec: Optional[List[int]] = None
+    segment_times_sec: Optional[Dict[str, float]] = None
+    segment_mode: Optional[str] = None
     difficulty: Optional[int] = None
     rating: Optional[int] = None
     comment: Optional[str] = None

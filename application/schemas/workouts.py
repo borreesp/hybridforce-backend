@@ -109,6 +109,7 @@ class WorkoutUpdate(ORMModel):
 
 class WorkoutRead(WorkoutBase):
     id: int
+    xp_estimate: Optional[int] = None
     level_times: List[WorkoutLevelTimeSchema] = Field(default_factory=list)
     capacities: List[WorkoutCapacitySchema] = Field(default_factory=list)
     hyrox_stations: List[WorkoutHyroxStationSchema] = Field(default_factory=list)
@@ -132,6 +133,8 @@ class WorkoutAnalysisResponse(ORMModel):
     pacing: dict
     expected_feel: str
     session_load: str
+    xp_estimate: Optional[int] = None
+    xp_components: Optional[dict] = None
 
 
 class WorkoutStatsRead(ORMModel):
