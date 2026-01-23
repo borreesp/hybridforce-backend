@@ -1,7 +1,13 @@
 import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status, Request
+import io
+import logging
+import cv2
+import numpy as np
+from PIL import Image
+import pytesseract
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status, Request, File
 from sqlalchemy.orm import Session
 
 from application.schemas.workouts import (
@@ -20,6 +26,8 @@ from application.schemas.movements import MovementRead, MovementMuscleSchema
 from application.services import WorkoutService
 from application.services.xp_service import compute_xp_estimate
 from domain.services.workout_analysis import analyze_workout
+from application.services.ocr_workout_parser import parse_workout_text
+from infrastructure.db.repositories.movement_repository import MovementRepository
 from domain.models.enums import EnergyDomain, MuscleGroup
 from infrastructure.db.session import get_session
 from infrastructure.auth.dependencies import get_current_user
@@ -36,13 +44,34 @@ def _decimal_to_float(value):
         return value
 
 
+def _normalize_code(code: Optional[str]) -> Optional[str]:
+    """
+    Corrige strings mal decodificados (UTF-8 leÃ­do como latin1) para no romper enums Pydantic.
+    """
+    if not code:
+        return code
+    try:
+        return code.encode("latin1").decode("utf-8")
+    except Exception:
+        return code
+
+
 def _movement_to_read(movement) -> MovementRead:
     return MovementRead(
         id=movement.id,
         name=movement.name,
+        code=movement.code,
         category=movement.category,
         description=movement.description,
+        pattern=movement.pattern,
         default_load_unit=movement.default_load_unit,
+        default_metric_unit=movement.default_metric_unit,
+        supports_reps=movement.supports_reps,
+        supports_load=movement.supports_load,
+        supports_distance=movement.supports_distance,
+        supports_time=movement.supports_time,
+        supports_calories=movement.supports_calories,
+        skill_level=movement.skill_level,
         video_url=movement.video_url,
         muscles=[
             MovementMuscleSchema(muscle_group=mm.muscle_group.code if mm.muscle_group else "", is_primary=mm.is_primary)
@@ -103,7 +132,7 @@ def to_read_model(workout: WorkoutORM, include_structure: bool = False, xp_estim
         is_active=workout.is_active,
         title=workout.title,
         description=workout.description,
-        domain=workout.domain.code if workout.domain else None,
+        domain=_normalize_code(workout.domain.code) if workout.domain else None,
         intensity=workout.intensity_level.code if workout.intensity_level else None,
         hyrox_transfer=workout.hyrox_transfer_level.code if workout.hyrox_transfer_level else None,
         wod_type=workout.wod_type,
@@ -138,7 +167,11 @@ def to_read_model(workout: WorkoutORM, include_structure: bool = False, xp_estim
             for lt in workout.level_times
         ],
         capacities=[
-            WorkoutCapacitySchema(capacity=cap.capacity.code if cap.capacity else None, value=cap.value, note=cap.note)
+            WorkoutCapacitySchema(
+                capacity=_normalize_code(cap.capacity.code) if cap.capacity else None,
+                value=cap.value,
+                note=cap.note,
+            )
             for cap in workout.capacities
         ],
         hyrox_stations=[
@@ -187,6 +220,53 @@ def list_workout_stats(session: Session = Depends(get_session)):
         if w.stats
     ]
 
+
+@analysis_router.post("/wod-analysis/ocr")
+async def ocr_wod_image(file: UploadFile = File(...)):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Archivo vacío o no válido.")
+
+    size_bytes = len(data)
+    mime = file.content_type
+    filename = file.filename
+
+    try:
+        image = Image.open(io.BytesIO(data)).convert("RGB")
+        np_image = np.array(image)
+        gray = cv2.cvtColor(np_image, cv2.COLOR_RGB2GRAY)
+        resized = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        denoised = cv2.medianBlur(resized, 3)
+        thresh = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 5)
+        text = pytesseract.image_to_string(thresh, lang="spa+eng", config="--psm 6")
+    except Exception as exc:
+        logging.exception("OCR processing failed: %s", exc)
+        raise HTTPException(status_code=500, detail="No se pudo procesar la imagen.")
+
+    preview = (text or "").strip().replace("\n", " ")[:120]
+    logging.info("[ocr] file=%s size=%s mime=%s text[0:120]=%s", filename, size_bytes, mime, preview)
+
+    return {
+        "text": text or "",
+        "confidence": None,
+        "mode": "real",
+        "source": {
+            "filename": filename,
+            "size_bytes": size_bytes,
+            "mime": mime,
+        },
+        "warning": None if text and text.strip() else "no_text_detected",
+    }
+
+
+@analysis_router.post("/wod-analysis/parse")
+async def parse_wod_text_route(payload: dict, session: Session = Depends(get_session)):
+    text = (payload or {}).get("text") or ""
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Texto vacio.")
+    movements = MovementRepository(session).list()
+    draft = parse_workout_text(text, movements)
+    return draft.to_dict()
 
 @router.post("/", response_model=WorkoutRead, status_code=status.HTTP_201_CREATED)
 def create_workout(payload: WorkoutCreate, session: Session = Depends(get_session)):

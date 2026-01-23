@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from sqlalchemy.orm import Session, joinedload
 
 from infrastructure.db.models import MovementMuscleORM, MovementORM, MuscleGroupORM
@@ -8,17 +10,26 @@ class MovementRepository(BaseRepository):
     def __init__(self, session: Session):
         super().__init__(session, MovementORM)
 
+    def list(self):
+        return self.session.query(MovementORM).options(joinedload(MovementORM.aliases)).all()
+
     def list_with_muscles(self):
         return (
             self.session.query(MovementORM)
-            .options(joinedload(MovementORM.muscles).joinedload(MovementMuscleORM.muscle_group))
+            .options(
+                joinedload(MovementORM.muscles).joinedload(MovementMuscleORM.muscle_group),
+                joinedload(MovementORM.aliases),
+            )
             .all()
         )
 
     def get_with_muscles(self, movement_id: int):
         return (
             self.session.query(MovementORM)
-            .options(joinedload(MovementORM.muscles).joinedload(MovementMuscleORM.muscle_group))
+            .options(
+                joinedload(MovementORM.muscles).joinedload(MovementMuscleORM.muscle_group),
+                joinedload(MovementORM.aliases),
+            )
             .filter(MovementORM.id == movement_id)
             .first()
         )

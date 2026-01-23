@@ -25,6 +25,7 @@ from .entities import (  # noqa: F401
     EquipmentORM,
     WorkoutEquipmentORM,
     MovementORM,
+    MovementAliasORM,
     MovementMuscleORM,
     MovementBenchmarkORM,
     WorkoutBlockORM,

@@ -1,4 +1,4 @@
-import os
+﻿import os
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import inspect
@@ -194,8 +194,8 @@ def seed_data(session):
         {"code": "Alta", "name": "Alta", "sort_order": 3},
     ]
     energy_domains = [
-        {"code": "AerÃ³bico", "name": "AerÃ³bico", "description": None},
-        {"code": "AnaerÃ³bico", "name": "AnaerÃ³bico", "description": None},
+        {"code": "Aeróbico", "name": "Aeróbico", "description": None},
+        {"code": "Anaeróbico", "name": "Anaeróbico", "description": None},
         {"code": "Mixto", "name": "Mixto", "description": None},
     ]
     physical_capacities = [
@@ -206,6 +206,22 @@ def seed_data(session):
         {"code": "Metcon", "name": "Metcon", "description": None},
         {"code": "Carga muscular", "name": "Carga muscular", "description": None},
     ]
+
+    # Arreglo de codificaciones malas anteriores (utf-8 mal decodificado como latin1)
+    bad_to_good = {
+        "AerÃƒÂ³bico": "Aeróbico",
+        "AnaerÃƒÂ³bico": "Anaeróbico",
+        "GimnÃ¡sticos": "Gimnásticos",
+    }
+    for bad, good in bad_to_good.items():
+        row = session.query(EnergyDomainORM).filter_by(code=bad).first()
+        if row:
+            row.code = good
+            row.name = good
+    row = session.query(PhysicalCapacityORM).filter_by(code="GimnÃ¡sticos").first()
+    if row:
+        row.code = "Gimnásticos"
+        row.name = "Gimnásticos"
     muscle_groups = [
         {"code": "Piernas", "name": "Piernas", "description": None},
         {"code": "Core", "name": "Core", "description": None},
@@ -241,89 +257,47 @@ def seed_data(session):
         return
 
     def id_for(model, code):
+        bad_to_good = {
+            "AerÃƒÂ³bico": "Aeróbico",
+            "AnaerÃƒÂ³bico": "Anaeróbico",
+            "GimnÃ¡sticos": "Gimnásticos",
+        }
+        code = bad_to_good.get(code, code)
         row = session.query(model).filter_by(code=code).first()
         return row.id if row else None
 
-    # Movements base
+    # Movements base (idempotente)
+    def get_mv(name, **fields):
+        mv = session.query(MovementORM).filter(MovementORM.name == name).first()
+        if mv:
+            for k, v in fields.items():
+                if v is None:
+                    continue
+                current = getattr(mv, k, None)
+                if current is None or (isinstance(current, str) and current.strip() == ""):
+                    setattr(mv, k, v)
+            return mv
+        mv = MovementORM(name=name, **fields)
+        session.add(mv)
+        session.flush()
+        return mv
 
-
-        # Movements base
-    run_mv = MovementORM(name="Run", category="Cardio", description="Running", default_load_unit=None)
-    row_mv = MovementORM(name="Row", category="Cardio", description="Row erg", default_load_unit=None)
-    wb_mv = MovementORM(name="Wall Ball", category="Metcon", description="Wall ball shot", default_load_unit="kg")
-    dl_mv = MovementORM(name="Deadlift", category="Strength", description="Barbell deadlift", default_load_unit="kg")
-    bbjo_mv = MovementORM(name="Burpee Box Jump Over", category="Metcon", description="BBJO", default_load_unit=None)
-    kb_lunge_mv = MovementORM(name="Kettlebell Lunge", category="Metcon", description="KB lunge", default_load_unit="kg")
+    run_mv = get_mv("Run", category="Cardio", description="Running")
+    row_mv = get_mv("Row", category="Cardio", description="Row erg")
+    wb_mv = get_mv("Wall Ball", category="Metcon", description="Wall ball shot", default_load_unit="kg")
+    dl_mv = get_mv("Deadlift", category="Strength", description="Barbell deadlift", default_load_unit="kg")
+    bbjo_mv = get_mv("Burpee Box Jump Over", category="Metcon", description="BBJO")
+    kb_lunge_mv = get_mv("Kettlebell Lunge", category="Metcon", description="KB lunge", default_load_unit="kg")
 
     # Movimientos extra para benchmarks CrossFit
-    thruster_mv = MovementORM(
-        name="Thruster",
-        category="Metcon",
-        description="Front squat into push press",
-        default_load_unit="kg",
-    )
-    pullup_mv = MovementORM(
-        name="Pull-up",
-        category="Gimnásticos",
-        description="Strict or kipping pull-up",
-        default_load_unit=None,
-    )
-    pushup_mv = MovementORM(
-        name="Push-up",
-        category="Gimnásticos",
-        description="Push-up al suelo",
-        default_load_unit=None,
-    )
-    air_squat_mv = MovementORM(
-        name="Air Squat",
-        category="Gimnásticos",
-        description="Sentadilla con peso corporal",
-        default_load_unit=None,
-    )
-    box_jump_mv = MovementORM(
-        name="Box Jump",
-        category="Metcon",
-        description="Salto al cajÃƒÂ³n",
-        default_load_unit=None,
-    )
-    du_mv = MovementORM(
-        name="Double Under",
-        category="Metcon",
-        description="Salto doble con comba",
-        default_load_unit=None,
-    )
-    kb_swing_mv = MovementORM(
-        name="KB Swing",
-        category="Metcon",
-        description="Kettlebell swing estilo americano o ruso",
-        default_load_unit="kg",
-    )
-    situp_mv = MovementORM(
-        name="Sit-up",
-        category="Gimnásticos",
-        description="Abdominal sit-up",
-        default_load_unit=None,
-    )
-
-    session.add_all(
-        [
-            run_mv,
-            row_mv,
-            wb_mv,
-            dl_mv,
-            bbjo_mv,
-            kb_lunge_mv,
-            thruster_mv,
-            pullup_mv,
-            pushup_mv,
-            air_squat_mv,
-            box_jump_mv,
-            du_mv,
-            kb_swing_mv,
-            situp_mv,
-        ]
-    )
-    session.flush()
+    thruster_mv = get_mv("Thruster", category="Metcon", description="Front squat into push press", default_load_unit="kg")
+    pullup_mv = get_mv("Pull-up", category="GimnÃ¡sticos", description="Strict or kipping pull-up")
+    pushup_mv = get_mv("Push-up", category="GimnÃ¡sticos", description="Push-up al suelo")
+    air_squat_mv = get_mv("Air Squat", category="GimnÃ¡sticos", description="Sentadilla con peso corporal")
+    box_jump_mv = get_mv("Box Jump", category="Metcon", description="Salto al cajÃƒÆ’Ã‚Â³n")
+    du_mv = get_mv("Double Under", category="Metcon", description="Salto doble con comba")
+    kb_swing_mv = get_mv("KB Swing", category="Metcon", description="Kettlebell swing estilo americano o ruso", default_load_unit="kg")
+    situp_mv = get_mv("Sit-up", category="GimnÃ¡sticos", description="Abdominal sit-up")
 
     def _shortened_metadata(**fields):
         limits = {
@@ -343,10 +317,21 @@ def seed_data(session):
 
     def bind_muscle(mv, muscles):
         for m in muscles:
+            mg_id = id_for(MuscleGroupORM, m)
+            if not mg_id:
+                continue
+            # Idempotent: skip if already linked
+            exists = (
+                session.query(MovementMuscleORM)
+                .filter_by(movement_id=mv.id, muscle_group_id=mg_id)
+                .first()
+            )
+            if exists:
+                continue
             session.add(
                 MovementMuscleORM(
                     movement_id=mv.id,
-                    muscle_group_id=id_for(MuscleGroupORM, m),
+                    muscle_group_id=mg_id,
                     is_primary=True,
                 )
             )
@@ -393,9 +378,9 @@ def seed_data(session):
     rower = EquipmentORM(name="RowErg", description="Concept2 RowErg", price=899.00, category="Cardio")
     sled = EquipmentORM(name="Sled", description="Prowler sled", price=450.00, category="HYROX")
     kettlebell = EquipmentORM(name="Kettlebell", description="KB entreno", price=75.00, category="Metcon")
-    rig = EquipmentORM(name="Pull-up Rig", description="Estructura para dominadas", price=1200.00, category="Gimnásticos")
-    box = EquipmentORM(name="Plyo Box", description="CajÃƒÂ³n pliomÃƒÂ©trico", price=150.00, category="Metcon")
-    barbell = EquipmentORM(name="Barbell", description="Barra olÃƒÂ­mpica", price=300.00, category="Strength")
+    rig = EquipmentORM(name="Pull-up Rig", description="Estructura para dominadas", price=1200.00, category="GimnÃ¡sticos")
+    box = EquipmentORM(name="Plyo Box", description="CajÃƒÆ’Ã‚Â³n pliomÃƒÆ’Ã‚Â©trico", price=150.00, category="Metcon")
+    barbell = EquipmentORM(name="Barbell", description="Barra olÃƒÆ’Ã‚Â­mpica", price=300.00, category="Strength")
 
     session.add_all([rower, sled, kettlebell, rig, box, barbell])
     session.flush()
@@ -468,7 +453,7 @@ def seed_data(session):
         title="HYROX Race Sim Short",
         description=(
             "3 rounds for time: 1000m run + 500m row + 25 wall balls. "
-            "Enfocado a simular el patrÃƒÂ³n carrera + estaciÃƒÂ³n."
+            "Enfocado a simular el patrÃƒÆ’Ã‚Â³n carrera + estaciÃƒÆ’Ã‚Â³n."
         ),
         domain_id=MIX,
         intensity_level_id=HIGH,
@@ -606,15 +591,15 @@ def seed_data(session):
         dominant_stimulus="Cardio",
         load_type="Light",
         athlete_profile_desc="Atleta intermedio que necesita mejorar consistencia de ritmo y eficiencia en wall balls.",
-        target_athlete_desc="HÃƒÂ­bridos que preparan HYROX o metcons largos.",
-        pacing_tip="No salir fuerte; debe sentirse casi demasiado fÃƒÂ¡cil en las 3 primeras rondas.",
-        pacing_detail="Mantener 70Ã¢â‚¬â€œ75% de esfuerzo las 5 primeras rondas y progresar al final.",
-        break_tip="Micro-pauses de 2Ã¢â‚¬â€œ3 respiraciones entre sets de wall balls si sube el pulso.",
-        rx_variant="Row a 1:50Ã¢â‚¬â€œ2:05/500m, balÃƒÂ³n 9/6kg.",
-        scaled_variant="Row suave 2:10Ã¢â‚¬â€œ2:30/500m, 150m row + 8 WB con 6/4kg.",
-        ai_observation="WOD perfecto para acumular metros sin un estrÃƒÂ©s brutal de sistema nervioso.",
+        target_athlete_desc="HÃƒÆ’Ã‚Â­bridos que preparan HYROX o metcons largos.",
+        pacing_tip="No salir fuerte; debe sentirse casi demasiado fÃƒÆ’Ã‚Â¡cil en las 3 primeras rondas.",
+        pacing_detail="Mantener 70ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“75% de esfuerzo las 5 primeras rondas y progresar al final.",
+        break_tip="Micro-pauses de 2ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“3 respiraciones entre sets de wall balls si sube el pulso.",
+        rx_variant="Row a 1:50ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“2:05/500m, balÃƒÆ’Ã‚Â³n 9/6kg.",
+        scaled_variant="Row suave 2:10ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“2:30/500m, 150m row + 8 WB con 6/4kg.",
+        ai_observation="WOD perfecto para acumular metros sin un estrÃƒÆ’Ã‚Â©s brutal de sistema nervioso.",
         session_load="Moderate",
-        session_feel="Pulso controlado, respiraciÃƒÂ³n continua.",
+        session_feel="Pulso controlado, respiraciÃƒÆ’Ã‚Â³n continua.",
     )
     engine.stats = WorkoutStatsORM(
         workout_id=engine.id,
@@ -660,16 +645,16 @@ def seed_data(session):
         work_rest_ratio="4:1",
         dominant_stimulus="Mixto (cardio + metcon)",
         load_type="Bodyweight/KB",
-        athlete_profile_desc="Atleta hÃƒÂ­brido con base aerÃƒÂ³bica decente y buena tolerancia a impacto.",
+        athlete_profile_desc="Atleta hÃƒÆ’Ã‚Â­brido con base aerÃƒÆ’Ã‚Â³bica decente y buena tolerancia a impacto.",
         target_athlete_desc="Intermedio/avanzado que compite en HYROX, OCR o functional fitness.",
-        pacing_tip="Ronda 1 controlada, la sensaciÃƒÂ³n debe ser de reserva clara.",
-        pacing_detail="Usar respiraciÃƒÂ³n nasal parcial en carrera para no reventar BBJO.",
-        break_tip="Romper lunges 10/10 y BBJO en bloques de 5Ã¢â‚¬â€œ5Ã¢â‚¬â€œ5 si es necesario.",
+        pacing_tip="Ronda 1 controlada, la sensaciÃƒÆ’Ã‚Â³n debe ser de reserva clara.",
+        pacing_detail="Usar respiraciÃƒÆ’Ã‚Â³n nasal parcial en carrera para no reventar BBJO.",
+        break_tip="Romper lunges 10/10 y BBJO en bloques de 5ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“5ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“5 si es necesario.",
         rx_variant="Run 800m / KB 24/16kg.",
         scaled_variant="Run 600m / KB 16/12kg / BBJO a box bajo.",
-        ai_observation="Genera mucha fatiga de cadena posterior y cardio alto, ideal como test hÃƒÂ­brido.",
+        ai_observation="Genera mucha fatiga de cadena posterior y cardio alto, ideal como test hÃƒÆ’Ã‚Â­brido.",
         session_load="High",
-        session_feel="Fatiga global alta, especialmente piernas y pulmÃƒÂ³n.",
+        session_feel="Fatiga global alta, especialmente piernas y pulmÃƒÆ’Ã‚Â³n.",
     )
     hybrid.stats = WorkoutStatsORM(
         workout_id=hybrid.id,
@@ -715,14 +700,14 @@ def seed_data(session):
         work_rest_ratio="1:1",
         dominant_stimulus="Fuerza-resistencia",
         load_type="Barbell + balon",
-        athlete_profile_desc="Intermedio con tÃƒÂ©cnica correcta en DL y buena movilidad de hombro.",
+        athlete_profile_desc="Intermedio con tÃƒÆ’Ã‚Â©cnica correcta en DL y buena movilidad de hombro.",
         target_athlete_desc="Construir fuerza de base sin llegar al fallo.",
         pacing_tip="No escoger un peso que comprometa la lumbar.",
-        pacing_detail="Dejar siempre 2Ã¢â‚¬â€œ3 reps en recÃƒÂ¡mara al final de cada minuto.",
-        break_tip="Usar los ÃƒÂºltimos 10Ã¢â‚¬â€œ15s del minuto para respirar profundo.",
+        pacing_detail="Dejar siempre 2ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“3 reps en recÃƒÆ’Ã‚Â¡mara al final de cada minuto.",
+        break_tip="Usar los ÃƒÆ’Ã‚Âºltimos 10ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“15s del minuto para respirar profundo.",
         rx_variant="DL 80/60kg + WB 9/6kg.",
         scaled_variant="DL 60/40kg + WB 6/4kg.",
-        ai_observation="SesiÃƒÂ³n perfecta para trabajo de fuerza tÃƒÂ©cnica con toque metabÃƒÂ³lico.",
+        ai_observation="SesiÃƒÆ’Ã‚Â³n perfecta para trabajo de fuerza tÃƒÆ’Ã‚Â©cnica con toque metabÃƒÆ’Ã‚Â³lico.",
         session_load="Moderate",
         session_feel="Cansancio local en posterior y hombro.",
     )
@@ -770,15 +755,15 @@ def seed_data(session):
         dominant_stimulus="Mixto (cardio + estaciones HYROX)",
         load_type="Bodyweight/mediana carga",
         athlete_profile_desc="Atleta que ya ha hecho o quiere hacer HYROX individual.",
-        target_athlete_desc="Preparar sensaciÃƒÂ³n de 'race pace' pero en formato corto.",
-        pacing_tip="Ritmo de carrera ligeramente mÃƒÂ¡s suave que ritmo de 1km en competiciÃƒÂ³n.",
-        pacing_detail="Usar carrera para recuperar respiraciÃƒÂ³n y remar a ritmo estable.",
-        break_tip="Wall balls en series de 15Ã¢â‚¬â€œ15Ã¢â‚¬â€œ10Ã¢â‚¬â€œ10Ã¢â‚¬â€œ10 con respiraciÃƒÂ³n controlada.",
+        target_athlete_desc="Preparar sensaciÃƒÆ’Ã‚Â³n de 'race pace' pero en formato corto.",
+        pacing_tip="Ritmo de carrera ligeramente mÃƒÆ’Ã‚Â¡s suave que ritmo de 1km en competiciÃƒÆ’Ã‚Â³n.",
+        pacing_detail="Usar carrera para recuperar respiraciÃƒÆ’Ã‚Â³n y remar a ritmo estable.",
+        break_tip="Wall balls en series de 15ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“15ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“10ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“10ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“10 con respiraciÃƒÆ’Ã‚Â³n controlada.",
         rx_variant="Run 1km / row moderado / WB 9/6kg.",
         scaled_variant="Run 800m / row 300m / WB 6/4kg (total 60 reps).",
-        ai_observation="WOD perfecto para testear cÃƒÂ³mo se comporta el atleta con bloques largos de carrera + estaciÃƒÂ³n.",
+        ai_observation="WOD perfecto para testear cÃƒÆ’Ã‚Â³mo se comporta el atleta con bloques largos de carrera + estaciÃƒÆ’Ã‚Â³n.",
         session_load="High",
-        session_feel="SensaciÃƒÂ³n de mini carrera HYROX.",
+        session_feel="SensaciÃƒÆ’Ã‚Â³n de mini carrera HYROX.",
     )
     hyrox_race.stats = WorkoutStatsORM(
         workout_id=hyrox_race.id,
@@ -819,16 +804,16 @@ def seed_data(session):
         work_rest_ratio="Intervalo denso",
         dominant_stimulus="Metcon pesado de piernas",
         load_type="KB/propio cuerpo",
-        athlete_profile_desc="Atleta que sufre con sled push/pull y necesita mÃƒÂ¡s fuerza-resistencia de pierna.",
+        athlete_profile_desc="Atleta que sufre con sled push/pull y necesita mÃƒÆ’Ã‚Â¡s fuerza-resistencia de pierna.",
         target_athlete_desc="Mejorar tolerancia a lactato en piernas.",
-        pacing_tip="Las dos primeras rondas deben sentirse mÃƒÂ¡s lentas de lo que te gustarÃƒÂ­a.",
+        pacing_tip="Las dos primeras rondas deben sentirse mÃƒÆ’Ã‚Â¡s lentas de lo que te gustarÃƒÆ’Ã‚Â­a.",
         pacing_detail="Correr suave, lunges controlados y BBJO en bloques de 5.",
         break_tip="Respiraciones profundas al terminar lunges antes de empezar BBJO.",
-        rx_variant="Run 400m / KB 24/16kg / BBJO estÃƒÂ¡ndar.",
+        rx_variant="Run 400m / KB 24/16kg / BBJO estÃƒÆ’Ã‚Â¡ndar.",
         scaled_variant="Run 300m / KB 16/12kg / burpees normales.",
-        ai_observation="Simula muy bien el patrÃƒÂ³n sensaciÃƒÂ³n de sled: piernas hinchadas y pulmÃƒÂ³n alto.",
+        ai_observation="Simula muy bien el patrÃƒÆ’Ã‚Â³n sensaciÃƒÆ’Ã‚Â³n de sled: piernas hinchadas y pulmÃƒÆ’Ã‚Â³n alto.",
         session_load="High",
-        session_feel="Piernas ardiendo, respiraciÃƒÂ³n alta.",
+        session_feel="Piernas ardiendo, respiraciÃƒÆ’Ã‚Â³n alta.",
     )
     hyrox_sled.stats = WorkoutStatsORM(
         workout_id=hyrox_sled.id,
@@ -868,15 +853,15 @@ def seed_data(session):
         volume_total="150 wall balls + 1000m row",
         work_rest_ratio="Block unico",
         dominant_stimulus="Carga muscular de piernas y hombro",
-        load_type="BalÃƒÂ³n + erg",
-        athlete_profile_desc="Cualquier atleta HYROX que quiera testear su estaciÃƒÂ³n final.",
-        target_athlete_desc="Practicar pacing y breaks ÃƒÂ³ptimos en wall balls.",
+        load_type="BalÃƒÆ’Ã‚Â³n + erg",
+        athlete_profile_desc="Cualquier atleta HYROX que quiera testear su estaciÃƒÆ’Ã‚Â³n final.",
+        target_athlete_desc="Practicar pacing y breaks ÃƒÆ’Ã‚Â³ptimos en wall balls.",
         pacing_tip="Nunca ir a fallo; series cortas y constantes.",
-        pacing_detail="Por ejemplo 15Ãƒâ€”10 reps con pausa breve entre series.",
-        break_tip="Fijar nÃƒÂºmero de respiraciones entre sets (3Ã¢â‚¬â€œ5).",
-        rx_variant="WB 9/6kg, objetivo a altura estÃƒÂ¡ndar HYROX.",
+        pacing_detail="Por ejemplo 15ÃƒÆ’Ã¢â‚¬â€10 reps con pausa breve entre series.",
+        break_tip="Fijar nÃƒÆ’Ã‚Âºmero de respiraciones entre sets (3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“5).",
+        rx_variant="WB 9/6kg, objetivo a altura estÃƒÆ’Ã‚Â¡ndar HYROX.",
         scaled_variant="WB 6/4kg con total 100 reps + 800m row.",
-        ai_observation="Excelente benchmark especÃƒÂ­fico para ver cÃƒÂ³mo llegas a la ÃƒÂºltima estaciÃƒÂ³n de la race.",
+        ai_observation="Excelente benchmark especÃƒÆ’Ã‚Â­fico para ver cÃƒÆ’Ã‚Â³mo llegas a la ÃƒÆ’Ã‚Âºltima estaciÃƒÆ’Ã‚Â³n de la race.",
         session_load="High",
         session_feel="Piernas y hombros muy cargados, cardio medio-alto.",
     )
@@ -899,7 +884,7 @@ def seed_data(session):
         WorkoutCapacityORM(
             capacity_id=id_for(PhysicalCapacityORM, "Carga muscular"),
             value=90,
-            note="Pierna/cuÃƒÂ¡driceps al lÃƒÂ­mite.",
+            note="Pierna/cuÃƒÆ’Ã‚Â¡driceps al lÃƒÆ’Ã‚Â­mite.",
         ),
         WorkoutCapacityORM(
             capacity_id=id_for(PhysicalCapacityORM, "Metcon"),
@@ -921,18 +906,18 @@ def seed_data(session):
         workout_id=hyrox_engine.id,
         volume_total="3.2km run + 1km row + 40 KB lunges",
         work_rest_ratio="Bloques largos",
-        dominant_stimulus="Engine aerÃƒÂ³bico",
+        dominant_stimulus="Engine aerÃƒÆ’Ã‚Â³bico",
         load_type="Cardio + KB ligera",
-        athlete_profile_desc="Atleta que respira bien pero le falta tiempo bajo tensiÃƒÂ³n en carrera.",
-        target_athlete_desc="Construir base aerÃƒÂ³bica especÃƒÂ­fica para HYROX.",
+        athlete_profile_desc="Atleta que respira bien pero le falta tiempo bajo tensiÃƒÆ’Ã‚Â³n en carrera.",
+        target_athlete_desc="Construir base aerÃƒÆ’Ã‚Â³bica especÃƒÆ’Ã‚Â­fica para HYROX.",
         pacing_tip="Ritmo de carrera conversacional (70%).",
         pacing_detail="Usar row como 'descanso activo' para bajar un poco pulsaciones.",
         break_tip="Romper lunges en series de 10 con pausa corta.",
         rx_variant="Run 800m / row 250m / KB 24/16kg.",
         scaled_variant="Run 600m / row 200m / KB 16/12kg.",
-        ai_observation="SesiÃƒÂ³n muy ÃƒÂºtil para dÃƒÂ­as donde quieres acumular volumen pero sin destrozarte.",
+        ai_observation="SesiÃƒÆ’Ã‚Â³n muy ÃƒÆ’Ã‚Âºtil para dÃƒÆ’Ã‚Â­as donde quieres acumular volumen pero sin destrozarte.",
         session_load="Moderate",
-        session_feel="SensaciÃƒÂ³n de 'largo controlado'.",
+        session_feel="SensaciÃƒÆ’Ã‚Â³n de 'largo controlado'.",
     )
     hyrox_engine.stats = WorkoutStatsORM(
         workout_id=hyrox_engine.id,
@@ -977,7 +962,7 @@ def seed_data(session):
         pacing_tip="Desde el minuto 1 como si fuera el minuto 15.",
         pacing_detail="Buscar ritmo sostenible de burpees que no se dispare a rojo.",
         break_tip="Parar de pie 3 respiraciones entre sets, nunca desplomado en el suelo.",
-        rx_variant="BBJO estÃƒÂ¡ndar + KB 24/16kg.",
+        rx_variant="BBJO estÃƒÆ’Ã‚Â¡ndar + KB 24/16kg.",
         scaled_variant="Burpees sencillos + KB 16/12kg.",
         ai_observation="Muy buen test mental y de consistencia de movimiento.",
         session_load="High",
@@ -990,7 +975,7 @@ def seed_data(session):
         rating_count=0,
     )
     hyrox_burpees.level_times = [
-        # aquÃƒÂ­ el tiempo es duraciÃƒÂ³n fija (20'), pero usamos referencia
+        # aquÃƒÆ’Ã‚Â­ el tiempo es duraciÃƒÆ’Ã‚Â³n fija (20'), pero usamos referencia
         WorkoutLevelTimeORM(athlete_level_id=id_for(AthleteLevelORM, "L1"), time_minutes=20.0, time_range="20-20"),
         WorkoutLevelTimeORM(athlete_level_id=id_for(AthleteLevelORM, "L5"), time_minutes=20.0, time_range="20-20"),
         WorkoutLevelTimeORM(athlete_level_id=id_for(AthleteLevelORM, "L10"), time_minutes=20.0, time_range="20-20"),
@@ -1023,17 +1008,17 @@ def seed_data(session):
         volume_total="45 thrusters + 45 pull-ups",
         work_rest_ratio="Sprint total",
         dominant_stimulus="Metcon muy agresivo",
-        load_type="Barbell + gimnÃƒÂ¡sticos",
-        athlete_profile_desc="Atleta con buena tÃƒÂ©cnica en thruster y kipping/chest-to-bar.",
-        target_athlete_desc="Test clÃƒÂ¡sico de potencia anaerÃƒÂ³bica.",
-        pacing_tip="Si tardas mÃƒÂ¡s de 7', no es un sprint, es un broken benchmark.",
+        load_type="Barbell + gimnÃƒÆ’Ã‚Â¡sticos",
+        athlete_profile_desc="Atleta con buena tÃƒÆ’Ã‚Â©cnica en thruster y kipping/chest-to-bar.",
+        target_athlete_desc="Test clÃƒÆ’Ã‚Â¡sico de potencia anaerÃƒÆ’Ã‚Â³bica.",
+        pacing_tip="Si tardas mÃƒÆ’Ã‚Â¡s de 7', no es un sprint, es un broken benchmark.",
         pacing_detail="Atletas avanzados: 21 unbroken o 12/9; resto 9/6/6 o similar.",
-        break_tip="Descansos muy cortos, 3Ã¢â‚¬â€œ5 respiraciones, siempre de pie.",
+        break_tip="Descansos muy cortos, 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“5 respiraciones, siempre de pie.",
         rx_variant="Thruster 42.5/30kg, pull-ups Rx.",
         scaled_variant="Thruster 30/20kg + jumping pull-ups o ring rows.",
-        ai_observation="WOD perfecto para evaluar engine anaerÃƒÂ³bico y habilidad gimnÃƒÂ¡stica.",
+        ai_observation="WOD perfecto para evaluar engine anaerÃƒÆ’Ã‚Â³bico y habilidad gimnÃƒÆ’Ã‚Â¡stica.",
         session_load="High",
-        session_feel="Lactato mÃƒÂ¡ximo, sensaciÃƒÂ³n de ahogo breve.",
+        session_feel="Lactato mÃƒÆ’Ã‚Â¡ximo, sensaciÃƒÆ’Ã‚Â³n de ahogo breve.",
     )
     fran.stats = WorkoutStatsORM(
         workout_id=fran.id,
@@ -1053,14 +1038,14 @@ def seed_data(session):
     fran.capacities = [
         WorkoutCapacityORM(capacity_id=id_for(PhysicalCapacityORM, "Metcon"), value=95, note="Sprint brutal."),
         WorkoutCapacityORM(
-            capacity_id=id_for(PhysicalCapacityORM, "Gimnásticos"),
+            capacity_id=id_for(PhysicalCapacityORM, "GimnÃ¡sticos"),
             value=80,
-            note="Pull-ups bajo estrÃƒÂ©s.",
+            note="Pull-ups bajo estrÃƒÆ’Ã‚Â©s.",
         ),
         WorkoutCapacityORM(
             capacity_id=id_for(PhysicalCapacityORM, "Carga muscular"),
             value=75,
-            note="Hombros y cuÃƒÂ¡driceps muy cargados.",
+            note="Hombros y cuÃƒÆ’Ã‚Â¡driceps muy cargados.",
         ),
     ]
     fran.muscles = [
@@ -1076,15 +1061,15 @@ def seed_data(session):
         dominant_stimulus="Resistencia larga + carga muscular brutal",
         load_type="Bodyweight (con o sin chaleco)",
         athlete_profile_desc="Atleta con experiencia y respeto por el volumen.",
-        target_athlete_desc="Test mental y fÃƒÂ­sico anual.",
+        target_athlete_desc="Test mental y fÃƒÆ’Ã‚Â­sico anual.",
         pacing_tip="Particionar desde el principio: nunca 'ir a por ello' de primeras.",
-        pacing_detail="ClÃƒÂ¡sico: 20 rondas de 5/10/15 con ritmo constante.",
-        break_tip="Si usas chaleco, sÃƒÂ© conservador y prioriza tÃƒÂ©cnica limpia.",
+        pacing_detail="ClÃƒÆ’Ã‚Â¡sico: 20 rondas de 5/10/15 con ritmo constante.",
+        break_tip="Si usas chaleco, sÃƒÆ’Ã‚Â© conservador y prioriza tÃƒÆ’Ã‚Â©cnica limpia.",
         rx_variant="Con chaleco 9/6kg.",
         scaled_variant="Sin chaleco + volumen reducido (por ejemplo 75/150/225).",
         ai_observation="No es un WOD para hacer cada semana; pensarlo como evento.",
         session_load="Very High",
-        session_feel="Extremadamente demandante, fatiga residual varios dÃƒÂ­as.",
+        session_feel="Extremadamente demandante, fatiga residual varios dÃƒÆ’Ã‚Â­as.",
     )
     murph.stats = WorkoutStatsORM(
         workout_id=murph.id,
@@ -1104,9 +1089,9 @@ def seed_data(session):
     murph.capacities = [
         WorkoutCapacityORM(capacity_id=id_for(PhysicalCapacityORM, "Resistencia"), value=95, note="Endurance extremo."),
         WorkoutCapacityORM(
-            capacity_id=id_for(PhysicalCapacityORM, "Gimnásticos"),
+            capacity_id=id_for(PhysicalCapacityORM, "GimnÃ¡sticos"),
             value=85,
-            note="Volumen de tracciÃƒÂ³n y empuje enorme.",
+            note="Volumen de tracciÃƒÆ’Ã‚Â³n y empuje enorme.",
         ),
         WorkoutCapacityORM(
             capacity_id=id_for(PhysicalCapacityORM, "Carga muscular"),
@@ -1124,18 +1109,18 @@ def seed_data(session):
         workout_id=helen.id,
         volume_total="1.2km run + 63 KB swings + 36 pull-ups",
         work_rest_ratio="Metcon 3 rondas",
-        dominant_stimulus="Resistencia + gimnÃƒÂ¡sticos ligeros",
+        dominant_stimulus="Resistencia + gimnÃƒÆ’Ã‚Â¡sticos ligeros",
         load_type="KB + peso corporal",
-        athlete_profile_desc="Atleta con tÃƒÂ©cnica decente de swing y pull-up.",
+        athlete_profile_desc="Atleta con tÃƒÆ’Ã‚Â©cnica decente de swing y pull-up.",
         target_athlete_desc="Buen benchmark mixto sin ser mortal.",
         pacing_tip="Ritmo de carrera estable, swings unbroken si es posible.",
-        pacing_detail="Pull-ups en 2Ã¢â‚¬â€œ3 sets dependiendo del nivel.",
-        break_tip="No correr tan rÃƒÂ¡pido que luego 'mueras' en la barra.",
+        pacing_detail="Pull-ups en 2ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“3 sets dependiendo del nivel.",
+        break_tip="No correr tan rÃƒÆ’Ã‚Â¡pido que luego 'mueras' en la barra.",
         rx_variant="KB 24/16kg.",
         scaled_variant="KB 16/12kg + jumping pull-ups.",
-        ai_observation="Ideal como referencia de cÃƒÂ³mo se comporta el engine medio del atleta.",
+        ai_observation="Ideal como referencia de cÃƒÆ’Ã‚Â³mo se comporta el engine medio del atleta.",
         session_load="Moderate",
-        session_feel="Llega cansado pero recupera rÃƒÂ¡pido.",
+        session_feel="Llega cansado pero recupera rÃƒÆ’Ã‚Â¡pido.",
     )
     helen.stats = WorkoutStatsORM(
         workout_id=helen.id,
@@ -1156,7 +1141,7 @@ def seed_data(session):
         WorkoutCapacityORM(capacity_id=id_for(PhysicalCapacityORM, "Resistencia"), value=80, note="Carrera."),
         WorkoutCapacityORM(capacity_id=id_for(PhysicalCapacityORM, "Metcon"), value=75, note="Mezcla con swings."),
         WorkoutCapacityORM(
-            capacity_id=id_for(PhysicalCapacityORM, "Gimnásticos"),
+            capacity_id=id_for(PhysicalCapacityORM, "GimnÃ¡sticos"),
             value=70,
             note="Pull-ups a ritmo moderado.",
         ),
@@ -1172,17 +1157,17 @@ def seed_data(session):
         volume_total="150 wall balls",
         work_rest_ratio="Block unico",
         dominant_stimulus="Carga muscular de pierna y hombro",
-        load_type="BalÃƒÂ³n",
-        athlete_profile_desc="Atleta con buena mecÃƒÂ¡nica de sentadilla frontal y movilidad suficiente.",
+        load_type="BalÃƒÆ’Ã‚Â³n",
+        athlete_profile_desc="Atleta con buena mecÃƒÆ’Ã‚Â¡nica de sentadilla frontal y movilidad suficiente.",
         target_athlete_desc="Ver tolerancia a volumen de WB.",
-        pacing_tip="Nunca ir a fallo; siempre dejar 3Ã¢â‚¬â€œ5 reps 'dentro'.",
-        pacing_detail="Dividir en bloques pequeÃƒÂ±os (por ejemplo 15Ãƒâ€”10 o 10Ãƒâ€”15).",
-        break_tip="Pausas activas de 5 respiraciones mirando al balÃƒÂ³n.",
+        pacing_tip="Nunca ir a fallo; siempre dejar 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“5 reps 'dentro'.",
+        pacing_detail="Dividir en bloques pequeÃƒÆ’Ã‚Â±os (por ejemplo 15ÃƒÆ’Ã¢â‚¬â€10 o 10ÃƒÆ’Ã¢â‚¬â€15).",
+        break_tip="Pausas activas de 5 respiraciones mirando al balÃƒÆ’Ã‚Â³n.",
         rx_variant="WB 9/6kg.",
-        scaled_variant="WB 6/4kg y total 90Ã¢â‚¬â€œ120 reps.",
-        ai_observation="Muy transferible a HYROX (estaciÃƒÂ³n 8).",
+        scaled_variant="WB 6/4kg y total 90ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“120 reps.",
+        ai_observation="Muy transferible a HYROX (estaciÃƒÆ’Ã‚Â³n 8).",
         session_load="Moderate-High",
-        session_feel="Piernas tocadas, respiraciÃƒÂ³n alta pero no extremo.",
+        session_feel="Piernas tocadas, respiraciÃƒÆ’Ã‚Â³n alta pero no extremo.",
     )
     karen.stats = WorkoutStatsORM(
         workout_id=karen.id,
@@ -1221,12 +1206,12 @@ def seed_data(session):
         workout_id=cindy.id,
         volume_total="AMRAP 20 de 5/10/15",
         work_rest_ratio="Trabajo continuo",
-        dominant_stimulus="GimnÃƒÂ¡sticos + resistencia",
+        dominant_stimulus="GimnÃƒÆ’Ã‚Â¡sticos + resistencia",
         load_type="Peso corporal",
-        athlete_profile_desc="Atleta con base gimnÃƒÂ¡stica decente.",
+        athlete_profile_desc="Atleta con base gimnÃƒÆ’Ã‚Â¡stica decente.",
         target_athlete_desc="Construir volumen a RPE medio.",
         pacing_tip="Desde el minuto 1 como si estuvieras en el 15.",
-        pacing_detail="Mejor 18 rondas constantes que 10 rÃƒÂ¡pidas y morir.",
+        pacing_detail="Mejor 18 rondas constantes que 10 rÃƒÆ’Ã‚Â¡pidas y morir.",
         break_tip="Evitar llegar al fallo en push-ups; partir desde el inicio.",
         rx_variant="Pull-ups Rx.",
         scaled_variant="Ring rows + knee push-ups.",
@@ -1250,7 +1235,7 @@ def seed_data(session):
         WorkoutLevelTimeORM(athlete_level_id=id_for(AthleteLevelORM, "L50"), time_minutes=20.0, time_range="20-20"),
     ]
     cindy.capacities = [
-        WorkoutCapacityORM(capacity_id=id_for(PhysicalCapacityORM, "Gimnásticos"), value=80, note="Volumen bodyweight."),
+        WorkoutCapacityORM(capacity_id=id_for(PhysicalCapacityORM, "GimnÃ¡sticos"), value=80, note="Volumen bodyweight."),
         WorkoutCapacityORM(
             capacity_id=id_for(PhysicalCapacityORM, "Resistencia"),
             value=70,
@@ -1359,7 +1344,7 @@ def seed_data(session):
         strength,
         1,
         "warmup",
-        "Calentamiento especÃƒÂ­fico",
+        "Calentamiento especÃƒÆ’Ã‚Â­fico",
         "Series progresivas de DL ligeros + wall balls suaves",
     )
     str_block = build_block(
@@ -1595,7 +1580,7 @@ def seed_data(session):
         1,
         "warmup",
         "Warm-up Fran",
-        "Movilidad hombro + thrusters ligeros + swings/pull-ups fÃƒÂ¡ciles.",
+        "Movilidad hombro + thrusters ligeros + swings/pull-ups fÃƒÆ’Ã‚Â¡ciles.",
     )
     fr_main = build_block(
         fran,
@@ -1679,7 +1664,7 @@ def seed_data(session):
         1,
         "warmup",
         "Warm-up Helen",
-        "Run suave + swings ligeros + algunas pull-ups tÃƒÂ©cnicas.",
+        "Run suave + swings ligeros + algunas pull-ups tÃƒÆ’Ã‚Â©cnicas.",
     )
     he2_main = build_block(
         helen,
@@ -1746,7 +1731,7 @@ def seed_data(session):
         1,
         "warmup",
         "Pre-Cindy",
-        "Pull-ups fÃƒÂ¡ciles, push-ups y air squats suaves.",
+        "Pull-ups fÃƒÆ’Ã‚Â¡ciles, push-ups y air squats suaves.",
     )
     ci_main = build_block(
         cindy,
@@ -1831,7 +1816,7 @@ def seed_data(session):
             UserCapacityProfileORM(user_id=user.id, capacity_id=id_for(PhysicalCapacityORM, "Resistencia"), value=78, measured_at=datetime.utcnow()),
             UserCapacityProfileORM(user_id=user.id, capacity_id=id_for(PhysicalCapacityORM, "Fuerza"), value=72, measured_at=datetime.utcnow()),
             UserCapacityProfileORM(user_id=user.id, capacity_id=id_for(PhysicalCapacityORM, "Metcon"), value=75, measured_at=datetime.utcnow()),
-            UserCapacityProfileORM(user_id=user.id, capacity_id=id_for(PhysicalCapacityORM, "Gimnásticos"), value=68, measured_at=datetime.utcnow()),
+            UserCapacityProfileORM(user_id=user.id, capacity_id=id_for(PhysicalCapacityORM, "GimnÃ¡sticos"), value=68, measured_at=datetime.utcnow()),
         ]
     )
 
@@ -1932,8 +1917,9 @@ def seed_data(session):
             session.flush()
             session.add(UserEventORM(user_id=user.id, event_id=event.id))
     except Exception:
-        # tabla eliminada por migración: ignorar silenciosamente para no romper seed
+        # tabla eliminada por migraciÃ³n: ignorar silenciosamente para no romper seed
         session.rollback()
 
     session.commit()
+
 

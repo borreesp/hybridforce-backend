@@ -26,3 +26,10 @@
 ## Riesgos observados
 - PRs se basan en bloques de un solo movimiento; WODs con bloques mixtos no generan PR (intencional para evitar falsos positivos).
 - Incremento de skill es heurístico (delta fijo) cuando el análisis no lo provee; si en el futuro el análisis devuelve `skill_*`, tendrá prioridad.
+
+## OCR /wod-analysis
+- Endpoint: `POST /wod-analysis/ocr` con Tesseract real.
+- Request: multipart/form-data con `file`.
+- Respuesta: `{text, confidence, mode: "real", source: {filename, size_bytes, mime}, warning?}`.
+- Pipeline: PIL -> OpenCV (grayscale, resize x2, denoise, adaptive threshold) -> `pytesseract.image_to_string(lang="spa+eng", config="--psm 6")`.
+- Log en backend: filename, size, mime, preview de texto (120 chars). Si no hay texto, warning `no_text_detected`.

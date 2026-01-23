@@ -436,9 +436,18 @@ class MovementORM(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
+    code = Column(String(80), nullable=True, unique=True)
     category = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)
+    pattern = Column(String(50), nullable=True)
     default_load_unit = Column(String(20), nullable=True)
+    default_metric_unit = Column(String(20), nullable=True)
+    supports_reps = Column(Boolean, nullable=False, default=False)
+    supports_load = Column(Boolean, nullable=False, default=False)
+    supports_distance = Column(Boolean, nullable=False, default=False)
+    supports_time = Column(Boolean, nullable=False, default=False)
+    supports_calories = Column(Boolean, nullable=False, default=False)
+    skill_level = Column(String(20), nullable=True)
     video_url = Column(Text, nullable=True)
 
     muscles = relationship("MovementMuscleORM", back_populates="movement", cascade="all, delete-orphan")
@@ -447,6 +456,24 @@ class MovementORM(Base):
     global_performance = relationship("GlobalPerformanceDataORM", back_populates="movement", cascade="all, delete-orphan")
     skills = relationship("UserSkillORM", back_populates="movement", cascade="all, delete-orphan")
     prs = relationship("UserPROM", back_populates="movement", cascade="all, delete-orphan")
+    aliases = relationship("MovementAliasORM", back_populates="movement", cascade="all, delete-orphan")
+
+
+class MovementAliasORM(Base):
+    __tablename__ = "movement_aliases"
+    __table_args__ = (
+        UniqueConstraint("movement_id", "alias_normalized", name="uq_movement_alias_normalized"),
+        Index("ix_movement_aliases_alias_normalized", "alias_normalized"),
+        Index("ix_movement_aliases_movement_id", "movement_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    movement_id = Column(Integer, ForeignKey("movements.id", ondelete="CASCADE"), nullable=False)
+    alias = Column(String(120), nullable=False)
+    alias_normalized = Column(String(120), nullable=False)
+    source = Column(String(30), nullable=True)
+
+    movement = relationship("MovementORM", back_populates="aliases")
 
 
 class MovementMuscleORM(Base):

@@ -16,7 +16,7 @@ from domain.models.entities import (
 )
 from domain.models.enums import EnergyDomain, IntensityLevel, MuscleGroup, PhysicalCapacity, HyroxStation
 from domain.services.workout_analysis import analyze_workout
-from infrastructure.db.models import WorkoutORM
+from infrastructure.db.models import WorkoutORM, MovementORM
 from infrastructure.db.repositories import WorkoutRepository
 
 
@@ -27,6 +27,44 @@ def _to_float(value):
 class WorkoutService:
     def __init__(self, session):
         self.repo = WorkoutRepository(session)
+        self._calorie_codes = {"row", "skierg", "bike_erg", "assault_bike", "echo_bike"}
+
+    def _movement_allows_calories(self, movement_id: int | None) -> bool:
+        if movement_id is None:
+            return False
+        mv = (
+            self.repo.session.query(MovementORM.id, MovementORM.code, MovementORM.supports_calories)
+            .filter(MovementORM.id == movement_id)
+            .first()
+        )
+        if not mv:
+            return False
+        if mv.supports_calories:
+            return True
+        return (mv.code or "").lower() in self._calorie_codes
+
+    def _strip_calories_from_payload(self, payload: dict):
+        """
+        Ensure calories only survive for ERG movements (row/ski/bike). Mutates payload in place.
+        """
+        def sanitize_mv(mv_dict: dict):
+            mid = mv_dict.get("movement_id") or mv_dict.get("movement", {}).get("id")
+            if not self._movement_allows_calories(mid):
+                mv_dict["calories"] = None
+                # mirror nested movement if present
+                if "movement" in mv_dict and isinstance(mv_dict["movement"], dict):
+                    mv_dict["movement"]["calories"] = None
+
+        # builder_blocks stored inside extra_attributes_json from front
+        blocks = payload.get("extra_attributes_json", {}).get("builder_blocks", [])
+        for block in blocks or []:
+            for mv in block.get("movements", []) or []:
+                sanitize_mv(mv)
+
+        # payload.blocks (if ever sent)
+        for block in payload.get("blocks", []) or []:
+            for mv in block.get("movements", []) or []:
+                sanitize_mv(mv)
 
     def list(self, filters: WorkoutFilter):
         return self.repo.list_filtered(filters.level, filters.domain, filters.muscle)
@@ -36,6 +74,7 @@ class WorkoutService:
 
     def create(self, data: WorkoutCreate):
         payload = data.model_dump()
+        self._strip_calories_from_payload(payload)
         return self.repo.create_with_relations(payload)
 
     def update(self, workout_id: int, data: WorkoutUpdate):
@@ -43,6 +82,7 @@ class WorkoutService:
         if not workout:
             return None
         payload = data.model_dump(exclude_none=True)
+        self._strip_calories_from_payload(payload)
         return self.repo.update_with_relations(workout, payload)
 
     def delete(self, workout_id: int):
@@ -62,6 +102,9 @@ class WorkoutService:
         return analyze_workout(domain_model)
 
     def analyze_payload(self, payload: dict):
+        workout_input = WorkoutCreate.model_validate(payload)
+        payload = workout_input.model_dump()
+        self._strip_calories_from_payload(payload)
         workout_input = WorkoutCreate.model_validate(payload)
         domain_model = self._to_domain_from_payload(workout_input)
         return analyze_workout(domain_model)

@@ -14,9 +14,18 @@ def _to_read_model(movement) -> MovementRead:
     return MovementRead(
         id=movement.id,
         name=movement.name,
+        code=movement.code,
         category=movement.category,
         description=movement.description,
+        pattern=movement.pattern,
         default_load_unit=movement.default_load_unit,
+        default_metric_unit=movement.default_metric_unit,
+        supports_reps=movement.supports_reps,
+        supports_load=movement.supports_load,
+        supports_distance=movement.supports_distance,
+        supports_time=movement.supports_time,
+        supports_calories=movement.supports_calories,
+        skill_level=movement.skill_level,
         video_url=movement.video_url,
         muscles=[
             MovementMuscleSchema(muscle_group=mm.muscle_group.code if mm.muscle_group else "", is_primary=mm.is_primary)
